@@ -14,6 +14,7 @@
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import type { Point, InsertPoint, Session, InsertSession } from "@shared/schema";
 
+import { join } from "path";
 // sql.js über require laden (CommonJS-kompatibel im ESM-Bundle via esbuild)
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const initSqlJs = require("sql.js");
@@ -41,7 +42,11 @@ let _db: SqlJsDatabase | null = null;
 async function getDb(): Promise<SqlJsDatabase> {
   if (_db) return _db;
 
-  const SQL = await initSqlJs();
+  // locateFile sagt sql.js wo die sql-wasm.wasm Datei liegt.
+  // Im Production-Build liegt sie neben dist/index.cjs
+  const SQL = await initSqlJs({
+    locateFile: () => join(__dirname, "sql-wasm.wasm")
+  });
 
   if (existsSync(DB_PATH)) {
     // Vorhandene Datei laden

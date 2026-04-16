@@ -1,6 +1,6 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
-import { rm, readFile } from "fs/promises";
+import { rm, readFile, copyFile } from "fs/promises";
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
@@ -56,6 +56,14 @@ async function buildAll() {
     external: externals,
     logLevel: "info",
   });
+
+  // sql.js braucht die WASM-Datei neben dem Bundle
+  // sql-wasm.wasm = die eigentliche SQLite-Engine als WebAssembly
+  console.log("copying sql-wasm.wasm...");
+  await copyFile(
+    "node_modules/sql.js/dist/sql-wasm.wasm",
+    "dist/sql-wasm.wasm"
+  );
 }
 
 buildAll().catch((err) => {
