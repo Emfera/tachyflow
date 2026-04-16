@@ -103,7 +103,8 @@ export function startCollector(port: string) {
     let buf = "";
 
     sock.connect(parseInt(tcpPort), host, () => {
-      storage.updateSession({ status: "running", error_msg: null });
+      // async IIFE für Storage-Aufrufe in synchronem Callback
+      void storage.updateSession({ status: "running", error_msg: null });
       broadcast({ type: "status", status: "running" });
 
       // Polling starten
@@ -131,21 +132,23 @@ export function startCollector(port: string) {
         if (key === state.lastKey) continue;
         state.lastKey = key;
 
-        const point = storage.addPoint({
-          pid: measurement.pid,
-          e: measurement.e,
-          n: measurement.n,
-          h: measurement.h,
-          timestamp: new Date().toISOString(),
-          source: "geocom_gsi",
-        });
-
-        broadcast({ type: "point", point });
+        // async IIFE: Punkt speichern und dann broadcasten
+        void (async () => {
+          const point = await storage.addPoint({
+            pid: measurement.pid,
+            e: measurement.e,
+            n: measurement.n,
+            h: measurement.h,
+            timestamp: new Date().toISOString(),
+            source: "geocom_gsi",
+          });
+          broadcast({ type: "point", point });
+        })();
       }
     });
 
     sock.on("error", (err) => {
-      storage.updateSession({ status: "error", error_msg: err.message });
+      void storage.updateSession({ status: "error", error_msg: err.message });
       broadcast({ type: "status", status: "error", message: err.message });
     });
 
@@ -167,6 +170,6 @@ export function stopCollector() {
     state.socket.destroy();
     state.socket = null;
   }
-  storage.updateSession({ status: "stopped", error_msg: null });
+  void storage.updateSession({ status: "stopped", error_msg: null });
   broadcast({ type: "status", status: "stopped" });
 }

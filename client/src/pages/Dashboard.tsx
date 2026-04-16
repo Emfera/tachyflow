@@ -153,10 +153,11 @@ function SettingsPanel({ session, onClose }: { session: Session; onClose: () => 
   const { toast } = useToast();
   const [port, setPort] = useState(session.port);
   const [filename, setFilename] = useState(session.filename);
-  const [dbF, setDbF] = useState(session.db_format);
-  const [csvF, setCsvF] = useState(session.csv_format);
-  const [gsiF, setGsiF] = useState(session.gsi_format);
-  const [geojsonF, setGeojsonF] = useState(session.geojson_format);
+  // sql.js speichert booleans als 0/1 — hier ins Frontend-boolean umwandeln
+  const [dbF, setDbF] = useState(Boolean(session.db_format));
+  const [csvF, setCsvF] = useState(Boolean(session.csv_format));
+  const [gsiF, setGsiF] = useState(Boolean(session.gsi_format));
+  const [geojsonF, setGeojsonF] = useState(Boolean(session.geojson_format));
 
   const saveMutation = useMutation({
     mutationFn: (data: Partial<Session>) => apiRequest("PATCH", "/api/session", data),
@@ -172,7 +173,8 @@ function SettingsPanel({ session, onClose }: { session: Session; onClose: () => 
       toast({ title: "Mindestens ein Format wählen", variant: "destructive" });
       return;
     }
-    saveMutation.mutate({ port, filename, db_format: dbF, csv_format: csvF, gsi_format: gsiF, geojson_format: geojsonF });
+    // Zurück zu 0/1 für die API (sql.js SQLite)
+    saveMutation.mutate({ port, filename, db_format: dbF ? 1 : 0, csv_format: csvF ? 1 : 0, gsi_format: gsiF ? 1 : 0, geojson_format: geojsonF ? 1 : 0 });
   };
 
   return (

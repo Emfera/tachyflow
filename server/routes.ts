@@ -13,34 +13,34 @@ export function registerRoutes(httpServer: ReturnType<typeof createServer>, app:
   // ── Punkte ────────────────────────────────────────────────────────────────
 
   // Alle Punkte abrufen
-  app.get("/api/points", (_req, res) => {
-    const pts = storage.getAllPoints();
+  app.get("/api/points", async (_req, res) => {
+    const pts = await storage.getAllPoints();
     res.json(pts);
   });
 
   // Punkt löschen
-  app.delete("/api/points/:id", (req, res) => {
+  app.delete("/api/points/:id", async (req, res) => {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: "Ungültige ID" });
-    storage.deletePoint(id);
+    await storage.deletePoint(id);
     res.json({ ok: true });
   });
 
   // Alle Punkte löschen
-  app.delete("/api/points", (_req, res) => {
-    storage.clearPoints();
+  app.delete("/api/points", async (_req, res) => {
+    await storage.clearPoints();
     res.json({ ok: true });
   });
 
   // ── Session / Einstellungen ───────────────────────────────────────────────
 
-  app.get("/api/session", (_req, res) => {
-    res.json(storage.getSession());
+  app.get("/api/session", async (_req, res) => {
+    res.json(await storage.getSession());
   });
 
-  app.patch("/api/session", (req, res) => {
+  app.patch("/api/session", async (req, res) => {
     const { port, db_format, csv_format, gsi_format, geojson_format, filename } = req.body;
-    const updated = storage.updateSession({
+    const updated = await storage.updateSession({
       ...(port !== undefined && { port }),
       ...(db_format !== undefined && { db_format }),
       ...(csv_format !== undefined && { csv_format }),
@@ -53,8 +53,8 @@ export function registerRoutes(httpServer: ReturnType<typeof createServer>, app:
 
   // ── Collector Start/Stop ──────────────────────────────────────────────────
 
-  app.post("/api/collector/start", (_req, res) => {
-    const session = storage.getSession();
+  app.post("/api/collector/start", async (_req, res) => {
+    const session = await storage.getSession();
     startCollector(session.port);
     res.json({ ok: true, status: "running" });
   });

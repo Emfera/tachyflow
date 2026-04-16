@@ -1,36 +1,60 @@
-import { sqliteTable, text, real, integer } from "drizzle-orm/sqlite-core";
-import { createInsertSchema } from "drizzle-zod";
+/**
+ * tachyflow — Datentypen und Validierung
+ *
+ * Kein drizzle-orm mehr — reine TypeScript-Interfaces und Zod-Schemas.
+ * sql.js speichert booleans als 0/1 in SQLite.
+ */
+
 import { z } from "zod";
 
-// Gemessene Punkte
-export const points = sqliteTable("points", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  pid: text("pid").notNull(),
-  e: real("e").notNull(),
-  n: real("n").notNull(),
-  h: real("h").notNull(),
-  timestamp: text("timestamp").notNull(),
-  source: text("source").notNull().default("geocom_gsi"),
+// ─── Point ───────────────────────────────────────────────────────────────────
+
+export interface Point {
+  id: number;
+  pid: string;
+  e: number;
+  n: number;
+  h: number;
+  timestamp: string;
+  source: string;
+}
+
+export const insertPointSchema = z.object({
+  pid: z.string(),
+  e: z.number(),
+  n: z.number(),
+  h: z.number(),
+  timestamp: z.string().optional(),
+  source: z.string().optional(),
 });
 
-// Collector-Session (Verbindungsstatus)
-export const sessions = sqliteTable("sessions", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  port: text("port").notNull().default("tcp://localhost:4444"),
-  db_format: integer("db_format", { mode: "boolean" }).notNull().default(true),
-  csv_format: integer("csv_format", { mode: "boolean" }).notNull().default(false),
-  gsi_format: integer("gsi_format", { mode: "boolean" }).notNull().default(false),
-  geojson_format: integer("geojson_format", { mode: "boolean" }).notNull().default(false),
-  filename: text("filename").notNull().default("aufnahme"),
-  status: text("status").notNull().default("stopped"), // stopped | running | error
-  started_at: text("started_at"),
-  error_msg: text("error_msg"),
-});
-
-export const insertPointSchema = createInsertSchema(points).omit({ id: true });
 export type InsertPoint = z.infer<typeof insertPointSchema>;
-export type Point = typeof points.$inferSelect;
 
-export const insertSessionSchema = createInsertSchema(sessions).omit({ id: true });
+// ─── Session ─────────────────────────────────────────────────────────────────
+
+export interface Session {
+  id: number;
+  port: string;
+  db_format: number;       // 0 | 1 (SQLite speichert boolean als Integer)
+  csv_format: number;
+  gsi_format: number;
+  geojson_format: number;
+  filename: string;
+  status: string;          // "stopped" | "running" | "error" | "reconnecting"
+  started_at: string | null;
+  error_msg: string | null;
+}
+
+export const insertSessionSchema = z.object({
+  port: z.string().optional(),
+  db_format: z.number().optional(),
+  csv_format: z.number().optional(),
+  gsi_format: z.number().optional(),
+  geojson_format: z.number().optional(),
+  filename: z.string().optional(),
+  status: z.string().optional(),
+  started_at: z.string().nullable().optional(),
+  error_msg: z.string().nullable().optional(),
+});
+
 export type InsertSession = z.infer<typeof insertSessionSchema>;
-export type Session = typeof sessions.$inferSelect;
