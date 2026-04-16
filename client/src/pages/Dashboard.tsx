@@ -66,10 +66,15 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-// ── 2D Lageplan ───────────────────────────────────────────────────────────────
+// ── 2D Lageplan mit Zoom/Pan ──────────────────────────────────────────────────
 
 function PointMap({ points }: { points: Point[] }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Zoom/Pan State
+  const viewRef = useRef({ zoom: 1, panX: 0, panY: 0 });
+  const dragRef = useRef<{ active: boolean; lastX: number; lastY: number; lastDist: number }>(
+    { active: false, lastX: 0, lastY: 0, lastDist: 0 }
+  );
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -81,46 +86,57 @@ function PointMap({ points }: { points: Point[] }) {
     const H = canvas.height;
     ctx.clearRect(0, 0, W, H);
 
-    // Hintergrund: sehr helles Blau-Grau (wie Kartenhintergrund)
+    // Hintergrund
     ctx.fillStyle = "#f1f5f9";
     ctx.fillRect(0, 0, W, H);
 
-    // Gitter
-    ctx.strokeStyle = "#e2e8f0";
-    ctx.lineWidth = 1;
-    const grid = 40;
-    for (let x = 0; x < W; x += grid) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
-    }
-    for (let y = 0; y < H; y += grid) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-    }
-
     if (points.length === 0) {
       ctx.fillStyle = "#94a3b8";
-      ctx.font = "13px General Sans, sans-serif";
+      ctx.font = "13px sans-serif";
       ctx.textAlign = "center";
       ctx.fillText("Noch keine Punkte", W / 2, H / 2 - 8);
-      ctx.font = "11px General Sans, sans-serif";
+      ctx.font = "11px sans-serif";
       ctx.fillStyle = "#cbd5e1";
       ctx.fillText("TS07 verbinden und Start drücken", W / 2, H / 2 + 12);
       return;
     }
 
+    const { zoom, panX, panY } = viewRef.current;
+
     const xs = points.map((p) => p.e);
     const ys = points.map((p) => p.n);
-    let minX = Math.min(...xs), maxX = Math.max(...xs);
-    let minY = Math.min(...ys), maxY = Math.max(...ys);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
 
     const pad = 44;
     const rangeX = maxX - minX || 2;
     const rangeY = maxY - minY || 2;
-    const scaleX = (W - 2 * pad) / rangeX;
-    const scaleY = (H - 2 * pad) / rangeY;
-    const scale = Math.min(scaleX, scaleY);
+    const baseScaleX = (W - 2 * pad) / rangeX;
+    const baseScaleY = (H - 2 * pad) / rangeY;
+    const baseScale = Math.min(baseScaleX, baseScaleY);
+    const scale = baseScale * zoom;
 
-    const offsetX = pad + ((W - 2 * pad) - rangeX * scale) / 2;
-    const offsetY = pad + ((H - 2 * pad) - rangeY * scale) / 2;
+    const baseOffX = pad + ((W - 2 * pad) - rangeX * scale) / 2;
+    const baseOffY = pad + ((H - 2 * pad) - rangeY * scale) / 2;
+    const offsetX = baseOffX + panX;
+    const offsetY = baseOffY + panY;
+
+    // Gitter (im transformierten Raum)
+    const gridStep = Math.pow(10, Math.floor(Math.log10(rangeX / 4)));
+    const gx0 = Math.floor(minX / gridStep) * gridStep;
+    const gy0 = Math.floor(minY / gridStep) * gridStep;
+    ctx.strokeStyle = "#e2e8f0";
+    ctx.lineWidth = 1;
+    for (let gx = gx0; gx <= maxX + gridStep; gx += gridStep) {
+      const cx = offsetX + (gx - minX) * scale;
+      if (cx < 0 || cx > W) continue;
+      ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
+    }
+    for (let gy = gy0; gy <= maxY + gridStep; gy += gridStep) {
+      const cy = H - (offsetY + (gy - minY) * scale);
+      if (cy < 0 || cy > H) continue;
+      ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.stroke();
+    }
 
     const toCanvas = (x: number, y: number) => ({
       cx: offsetX + (x - minX) * scale,
@@ -145,7 +161,6 @@ function PointMap({ points }: { points: Point[] }) {
       const isLast = i === points.length - 1;
 
       if (isLast) {
-        // Letzter Punkt: größer, mit Halo
         ctx.beginPath();
         ctx.arc(cx, cy, 10, 0, Math.PI * 2);
         ctx.fillStyle = "rgba(37, 99, 235, 0.12)";
@@ -160,13 +175,132 @@ function PointMap({ points }: { points: Point[] }) {
       ctx.lineWidth = isLast ? 2 : 1.5;
       ctx.stroke();
 
-      // Label (alle Punkte, kleiner)
       ctx.fillStyle = isLast ? "#1e293b" : "#64748b";
-      ctx.font = `${isLast ? "bold " : ""}11px General Sans, sans-serif`;
+      ctx.font = `${isLast ? "bold " : ""}11px sans-serif`;
       ctx.textAlign = "center";
       ctx.fillText(p.pid, cx, cy - 11);
     });
+
+    // Zoom-Anzeige
+    if (zoom !== 1) {
+      ctx.fillStyle = "rgba(30,41,59,0.55)";
+      ctx.font = "11px sans-serif";
+      ctx.textAlign = "right";
+      ctx.fillText(`${zoom.toFixed(1)}×`, W - 8, H - 8);
+    }
   }, [points]);
+
+  // Zoom zentriert auf Canvas-Mitte
+  const applyZoom = useCallback((delta: number, cx: number, cy: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const v = viewRef.current;
+    const factor = delta > 0 ? 1.2 : 1 / 1.2;
+    const newZoom = Math.min(Math.max(v.zoom * factor, 0.2), 20);
+    // Zoom um den Cursor-Punkt
+    v.panX = cx - (cx - v.panX) * (newZoom / v.zoom);
+    v.panY = cy - (cy - v.panY) * (newZoom / v.zoom);
+    v.zoom = newZoom;
+    draw();
+  }, [draw]);
+
+  // Maus-Wheel Zoom
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      applyZoom(-e.deltaY, e.offsetX, e.offsetY);
+    };
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", onWheel);
+  }, [applyZoom]);
+
+  // Maus Pan
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onDown = (e: MouseEvent) => {
+      dragRef.current.active = true;
+      dragRef.current.lastX = e.clientX;
+      dragRef.current.lastY = e.clientY;
+    };
+    const onMove = (e: MouseEvent) => {
+      if (!dragRef.current.active) return;
+      viewRef.current.panX += e.clientX - dragRef.current.lastX;
+      viewRef.current.panY += e.clientY - dragRef.current.lastY;
+      dragRef.current.lastX = e.clientX;
+      dragRef.current.lastY = e.clientY;
+      draw();
+    };
+    const onUp = () => { dragRef.current.active = false; };
+    canvas.addEventListener("mousedown", onDown);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      canvas.removeEventListener("mousedown", onDown);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [draw]);
+
+  // Touch: Pan + Pinch-Zoom
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 1) {
+        dragRef.current.active = true;
+        dragRef.current.lastX = e.touches[0].clientX;
+        dragRef.current.lastY = e.touches[0].clientY;
+      } else if (e.touches.length === 2) {
+        dragRef.current.active = false;
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        dragRef.current.lastDist = Math.hypot(dx, dy);
+      }
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      if (e.touches.length === 1 && dragRef.current.active) {
+        viewRef.current.panX += e.touches[0].clientX - dragRef.current.lastX;
+        viewRef.current.panY += e.touches[0].clientY - dragRef.current.lastY;
+        dragRef.current.lastX = e.touches[0].clientX;
+        dragRef.current.lastY = e.touches[0].clientY;
+        draw();
+      } else if (e.touches.length === 2) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const dist = Math.hypot(dx, dy);
+        const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        const rect = canvas.getBoundingClientRect();
+        applyZoom(dist - dragRef.current.lastDist, midX - rect.left, midY - rect.top);
+        dragRef.current.lastDist = dist;
+      }
+    };
+    const onTouchEnd = () => { dragRef.current.active = false; };
+    canvas.addEventListener("touchstart", onTouchStart, { passive: false });
+    canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+    canvas.addEventListener("touchend", onTouchEnd);
+    return () => {
+      canvas.removeEventListener("touchstart", onTouchStart);
+      canvas.removeEventListener("touchmove", onTouchMove);
+      canvas.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [applyZoom, draw]);
+
+  // Doppelklick/Doppeltap: Reset
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onDblClick = () => {
+      viewRef.current = { zoom: 1, panX: 0, panY: 0 };
+      draw();
+    };
+    canvas.addEventListener("dblclick", onDblClick);
+    return () => canvas.removeEventListener("dblclick", onDblClick);
+  }, [draw]);
 
   useEffect(() => { draw(); }, [draw]);
 
@@ -186,7 +320,7 @@ function PointMap({ points }: { points: Point[] }) {
     <canvas
       ref={canvasRef}
       className="w-full h-full rounded-b-xl"
-      style={{ minHeight: 220 }}
+      style={{ minHeight: 220, cursor: "grab", touchAction: "none" }}
     />
   );
 }
@@ -614,7 +748,7 @@ export default function Dashboard() {
             )}
           </div>
           <div style={{ height: 280 }}>
-            <PointMap points={[...points].reverse()} />
+            <PointMap points={points} />
           </div>
         </div>
 
@@ -662,7 +796,7 @@ export default function Dashboard() {
 
           {/* Punktliste */}
           <PointList
-            points={[...points].reverse()}
+            points={points}
             onDelete={(id) => setDeleteId(id)}
             onClearAll={() => setShowClearAll(true)}
           />
