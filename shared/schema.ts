@@ -40,6 +40,8 @@ export interface Session {
   gsi_format: number;
   geojson_format: number;
   filename: string;
+  epsg_code: number;       // EPSG-Code des Koordinatensystems (nur Metadaten, keine Transformation)
+                           // Österreich: 31256 = MGI/GK M31 (Standard), 31255 = M28, 31257 = M34
   status: string;          // "stopped" | "running" | "error" | "reconnecting"
   started_at: string | null;
   error_msg: string | null;
@@ -52,6 +54,7 @@ export const insertSessionSchema = z.object({
   gsi_format: z.number().optional(),
   geojson_format: z.number().optional(),
   filename: z.string().optional(),
+  epsg_code: z.number().optional(),
   status: z.string().optional(),
   started_at: z.string().nullable().optional(),
   error_msg: z.string().nullable().optional(),

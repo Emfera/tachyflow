@@ -76,11 +76,19 @@ async function getDb(): Promise<SqlJsDatabase> {
       gsi_format    INTEGER NOT NULL DEFAULT 0,
       geojson_format INTEGER NOT NULL DEFAULT 0,
       filename      TEXT    NOT NULL DEFAULT 'aufnahme',
+      epsg_code     INTEGER NOT NULL DEFAULT 31256,
       status        TEXT    NOT NULL DEFAULT 'stopped',
       started_at    TEXT,
       error_msg     TEXT
     );
   `);
+
+  // Migration: epsg_code-Spalte zu bestehenden Datenbanken hinzufügen (idempotent)
+  try {
+    _db.run("ALTER TABLE sessions ADD COLUMN epsg_code INTEGER NOT NULL DEFAULT 31256");
+  } catch {
+    // Spalte existiert bereits — kein Fehler
+  }
 
   // Einmalig auf Platte schreiben (damit die Datei existiert)
   _save();
@@ -179,9 +187,9 @@ export class Storage implements IStorage {
     // Neue Default-Session anlegen
     return _runAndGetLast<Session>(
       db,
-      `INSERT INTO sessions (port, db_format, csv_format, gsi_format, geojson_format, filename, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ["tcp://localhost:4444", 1, 0, 0, 0, "aufnahme", "stopped"],
+      `INSERT INTO sessions (port, db_format, csv_format, gsi_format, geojson_format, filename, epsg_code, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ["tcp://localhost:4444", 1, 0, 0, 0, "aufnahme", 31256, "stopped"],
       "SELECT * FROM sessions LIMIT 1"
     );
   }
