@@ -469,10 +469,10 @@ export default function Dashboard() {
                   </span>
 
                   {/* Koordinaten */}
-                  <div className="flex-1 grid grid-cols-3 gap-2 text-xs tabular text-slate-500 min-w-0">
-                    <span className="text-right truncate">{p.e.toFixed(3)}</span>
-                    <span className="text-right truncate">{p.n.toFixed(3)}</span>
-                    <span className="text-right">{p.h.toFixed(3)}</span>
+                  <div className="flex-1 grid gap-1 text-xs tabular text-slate-500 min-w-0" style={{gridTemplateColumns: '1fr 1.4fr 0.9fr'}}>
+                    <span className="text-right font-mono">{p.e.toFixed(3)}</span>
+                    <span className="text-right font-mono">{p.n.toFixed(3)}</span>
+                    <span className="text-right font-mono">{p.h.toFixed(3)}</span>
                   </div>
 
                   {/* Löschen */}
@@ -494,7 +494,7 @@ export default function Dashboard() {
               <div className="flex items-center gap-3">
                 <span className="w-6" />
                 <span className="w-20 text-xs text-slate-400">PID</span>
-                <div className="flex-1 grid grid-cols-3 gap-2 text-xs text-slate-400">
+                <div className="flex-1 grid gap-1 text-xs text-slate-400" style={{gridTemplateColumns: '1fr 1.4fr 0.9fr'}}>
                   <span className="text-right">E (m)</span>
                   <span className="text-right">N (m)</span>
                   <span className="text-right">H (m)</span>
