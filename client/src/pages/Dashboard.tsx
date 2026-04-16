@@ -3,7 +3,8 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
   Trash2, Play, Square, Settings, Crosshair,
-  Wifi, WifiOff, AlertCircle, RefreshCw, MapPin, ChevronDown, ChevronUp
+  Wifi, WifiOff, AlertCircle, RefreshCw, MapPin, ChevronDown, ChevronUp,
+  Maximize2, Lock, Navigation
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -66,15 +67,36 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-// ── 2D Lageplan mit Zoom/Pan ──────────────────────────────────────────────────
+// ── Karten-Modi ───────────────────────────────────────────────────────────────
+// full   — alle Punkte im Blick (dynamisch)
+// fixed  — fixer Zoom + Extent (manuelle Pan/Zoom gesperrt)
+// follow — letzter Punkt immer in der Mitte, fixer Zoom
 
-function PointMap({ points }: { points: Point[] }) {
+type MapMode = "full" | "fixed" | "follow";
+const FOLLOW_ZOOM = 4;   // Zoom-Faktor für Follow-Modus (4× Basis)
+
+// ── 2D Lageplan ───────────────────────────────────────────────────────────────
+
+function PointMap({ points, mode }: { points: Point[]; mode: MapMode }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  // Zoom/Pan State
+  // Manueller View-State (nur in "full"-Modus durch Pan/Zoom verändert)
   const viewRef = useRef({ zoom: 1, panX: 0, panY: 0 });
   const dragRef = useRef<{ active: boolean; lastX: number; lastY: number; lastDist: number }>(
     { active: false, lastX: 0, lastY: 0, lastDist: 0 }
   );
+
+  // Hilfsfunktion: Basistransformation für alle Punkte (Full-Extent-Basis)
+  const getBaseTransform = useCallback((W: number, H: number) => {
+    const xs = points.map((p) => p.e);
+    const ys = points.map((p) => p.n);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const pad = 44;
+    const rangeX = maxX - minX || 2;
+    const rangeY = maxY - minY || 2;
+    const baseScale = Math.min((W - 2 * pad) / rangeX, (H - 2 * pad) / rangeY);
+    return { minX, minY, maxX, maxY, rangeX, rangeY, baseScale, pad };
+  }, [points]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -85,8 +107,6 @@ function PointMap({ points }: { points: Point[] }) {
     const W = canvas.width;
     const H = canvas.height;
     ctx.clearRect(0, 0, W, H);
-
-    // Hintergrund
     ctx.fillStyle = "#f1f5f9";
     ctx.fillRect(0, 0, W, H);
 
@@ -101,41 +121,42 @@ function PointMap({ points }: { points: Point[] }) {
       return;
     }
 
-    const { zoom, panX, panY } = viewRef.current;
+    const { minX, minY, maxX, maxY, rangeX, rangeY, baseScale, pad } = getBaseTransform(W, H);
 
-    const xs = points.map((p) => p.e);
-    const ys = points.map((p) => p.n);
-    const minX = Math.min(...xs), maxX = Math.max(...xs);
-    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    // Effektiven Zoom + Offset je nach Modus berechnen
+    let scale: number;
+    let offsetX: number;
+    let offsetY: number;
 
-    const pad = 44;
-    const rangeX = maxX - minX || 2;
-    const rangeY = maxY - minY || 2;
-    const baseScaleX = (W - 2 * pad) / rangeX;
-    const baseScaleY = (H - 2 * pad) / rangeY;
-    const baseScale = Math.min(baseScaleX, baseScaleY);
-    const scale = baseScale * zoom;
-
-    const baseOffX = pad + ((W - 2 * pad) - rangeX * scale) / 2;
-    const baseOffY = pad + ((H - 2 * pad) - rangeY * scale) / 2;
-    const offsetX = baseOffX + panX;
-    const offsetY = baseOffY + panY;
-
-    // Gitter (im transformierten Raum)
-    const gridStep = Math.pow(10, Math.floor(Math.log10(rangeX / 4)));
-    const gx0 = Math.floor(minX / gridStep) * gridStep;
-    const gy0 = Math.floor(minY / gridStep) * gridStep;
-    ctx.strokeStyle = "#e2e8f0";
-    ctx.lineWidth = 1;
-    for (let gx = gx0; gx <= maxX + gridStep; gx += gridStep) {
-      const cx = offsetX + (gx - minX) * scale;
-      if (cx < 0 || cx > W) continue;
-      ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
-    }
-    for (let gy = gy0; gy <= maxY + gridStep; gy += gridStep) {
-      const cy = H - (offsetY + (gy - minY) * scale);
-      if (cy < 0 || cy > H) continue;
-      ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.stroke();
+    if (mode === "full") {
+      // Manueller Pan/Zoom beeinflusst Full-Modus
+      const { zoom, panX, panY } = viewRef.current;
+      scale = baseScale * zoom;
+      const baseOffX = pad + ((W - 2 * pad) - rangeX * scale) / 2;
+      const baseOffY = pad + ((H - 2 * pad) - rangeY * scale) / 2;
+      offsetX = baseOffX + panX;
+      offsetY = baseOffY + panY;
+    } else if (mode === "fixed") {
+      // Fixer Zoom: aktueller manuelle Zoom bleibt, aber kein neues Pan
+      const { zoom, panX, panY } = viewRef.current;
+      scale = baseScale * zoom;
+      const baseOffX = pad + ((W - 2 * pad) - rangeX * scale) / 2;
+      const baseOffY = pad + ((H - 2 * pad) - rangeY * scale) / 2;
+      offsetX = baseOffX + panX;
+      offsetY = baseOffY + panY;
+    } else {
+      // follow: letzter Punkt zentriert, FOLLOW_ZOOM× Basis-Zoom
+      // toCanvas: cx = offsetX + (x - minX)*scale
+      //           cy = H - (offsetY + (y - minY)*scale)
+      // Damit letzter Punkt in Canvas-Mitte: cx=W/2, cy=H/2
+      //   W/2 = offsetX + (last.e - minX)*scale  => offsetX = W/2 - (last.e - minX)*scale
+      //   H/2 = H - (offsetY + (last.n - minY)*scale)
+      //       => offsetY + (last.n - minY)*scale = H/2
+      //       => offsetY = H/2 - (last.n - minY)*scale
+      const last = points[points.length - 1];
+      scale = baseScale * FOLLOW_ZOOM;
+      offsetX = W / 2 - (last.e - minX) * scale;
+      offsetY = H / 2 - (last.n - minY) * scale;
     }
 
     const toCanvas = (x: number, y: number) => ({
@@ -143,7 +164,22 @@ function PointMap({ points }: { points: Point[] }) {
       cy: H - (offsetY + (y - minY) * scale),
     });
 
-    // Verbindungslinien (gestrichelt)
+    // Gitter
+    const gridStep = Math.pow(10, Math.floor(Math.log10(Math.max(rangeX, rangeY) / 4)));
+    ctx.strokeStyle = "#e2e8f0";
+    ctx.lineWidth = 1;
+    for (let gx = Math.floor(minX / gridStep) * gridStep; gx <= maxX + gridStep; gx += gridStep) {
+      const { cx } = toCanvas(gx, minY);
+      if (cx < -50 || cx > W + 50) continue;
+      ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
+    }
+    for (let gy = Math.floor(minY / gridStep) * gridStep; gy <= maxY + gridStep; gy += gridStep) {
+      const { cy } = toCanvas(minX, gy);
+      if (cy < -50 || cy > H + 50) continue;
+      ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.stroke();
+    }
+
+    // Verbindungslinien
     ctx.strokeStyle = "#93c5fd";
     ctx.lineWidth = 1.5;
     ctx.setLineDash([4, 4]);
@@ -155,18 +191,16 @@ function PointMap({ points }: { points: Point[] }) {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Punkte zeichnen
+    // Punkte
     points.forEach((p, i) => {
       const { cx, cy } = toCanvas(p.e, p.n);
       const isLast = i === points.length - 1;
-
       if (isLast) {
         ctx.beginPath();
         ctx.arc(cx, cy, 10, 0, Math.PI * 2);
         ctx.fillStyle = "rgba(37, 99, 235, 0.12)";
         ctx.fill();
       }
-
       ctx.beginPath();
       ctx.arc(cx, cy, isLast ? 6 : 4, 0, Math.PI * 2);
       ctx.fillStyle = isLast ? "#1d4ed8" : "#3b82f6";
@@ -174,44 +208,38 @@ function PointMap({ points }: { points: Point[] }) {
       ctx.strokeStyle = "#fff";
       ctx.lineWidth = isLast ? 2 : 1.5;
       ctx.stroke();
-
       ctx.fillStyle = isLast ? "#1e293b" : "#64748b";
       ctx.font = `${isLast ? "bold " : ""}11px sans-serif`;
       ctx.textAlign = "center";
       ctx.fillText(p.pid, cx, cy - 11);
     });
 
-    // Zoom-Anzeige
-    if (zoom !== 1) {
-      ctx.fillStyle = "rgba(30,41,59,0.55)";
-      ctx.font = "11px sans-serif";
-      ctx.textAlign = "right";
-      ctx.fillText(`${zoom.toFixed(1)}×`, W - 8, H - 8);
-    }
-  }, [points]);
+    // Modus-Label + Zoom-Anzeige
+    const modeLabel = mode === "full" ? "Alle Punkte" : mode === "fixed" ? "Fixer Zoom" : "Folgen";
+    const zoomVal = mode === "follow" ? FOLLOW_ZOOM : viewRef.current.zoom;
+    ctx.fillStyle = "rgba(30,41,59,0.45)";
+    ctx.font = "10px sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(`${modeLabel} · ${zoomVal.toFixed(1)}×`, W - 8, H - 8);
+  }, [points, mode, getBaseTransform]);
 
-  // Zoom zentriert auf Canvas-Mitte
+  // Zoom-Helper (nur in full/fixed aktiv)
   const applyZoom = useCallback((delta: number, cx: number, cy: number) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (mode === "follow") return;
     const v = viewRef.current;
     const factor = delta > 0 ? 1.2 : 1 / 1.2;
-    const newZoom = Math.min(Math.max(v.zoom * factor, 0.2), 20);
-    // Zoom um den Cursor-Punkt
+    const newZoom = Math.min(Math.max(v.zoom * factor, 0.2), 40);
     v.panX = cx - (cx - v.panX) * (newZoom / v.zoom);
     v.panY = cy - (cy - v.panY) * (newZoom / v.zoom);
     v.zoom = newZoom;
     draw();
-  }, [draw]);
+  }, [mode, draw]);
 
-  // Maus-Wheel Zoom
+  // Wheel
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      applyZoom(-e.deltaY, e.offsetX, e.offsetY);
-    };
+    const onWheel = (e: WheelEvent) => { e.preventDefault(); applyZoom(-e.deltaY, e.offsetX, e.offsetY); };
     canvas.addEventListener("wheel", onWheel, { passive: false });
     return () => canvas.removeEventListener("wheel", onWheel);
   }, [applyZoom]);
@@ -221,6 +249,7 @@ function PointMap({ points }: { points: Point[] }) {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const onDown = (e: MouseEvent) => {
+      if (mode === "follow") return;
       dragRef.current.active = true;
       dragRef.current.lastX = e.clientX;
       dragRef.current.lastY = e.clientY;
@@ -242,26 +271,29 @@ function PointMap({ points }: { points: Point[] }) {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [draw]);
+  }, [mode, draw]);
 
-  // Touch: Pan + Pinch-Zoom
+  // Touch Pan + Pinch
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const onTouchStart = (e: TouchEvent) => {
+      if (mode === "follow") return;
       if (e.touches.length === 1) {
         dragRef.current.active = true;
         dragRef.current.lastX = e.touches[0].clientX;
         dragRef.current.lastY = e.touches[0].clientY;
       } else if (e.touches.length === 2) {
         dragRef.current.active = false;
-        const dx = e.touches[0].clientX - e.touches[1].clientX;
-        const dy = e.touches[0].clientY - e.touches[1].clientY;
-        dragRef.current.lastDist = Math.hypot(dx, dy);
+        dragRef.current.lastDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
       }
     };
     const onTouchMove = (e: TouchEvent) => {
       e.preventDefault();
+      if (mode === "follow") return;
       if (e.touches.length === 1 && dragRef.current.active) {
         viewRef.current.panX += e.touches[0].clientX - dragRef.current.lastX;
         viewRef.current.panY += e.touches[0].clientY - dragRef.current.lastY;
@@ -269,13 +301,16 @@ function PointMap({ points }: { points: Point[] }) {
         dragRef.current.lastY = e.touches[0].clientY;
         draw();
       } else if (e.touches.length === 2) {
-        const dx = e.touches[0].clientX - e.touches[1].clientX;
-        const dy = e.touches[0].clientY - e.touches[1].clientY;
-        const dist = Math.hypot(dx, dy);
-        const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-        const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        const dist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
         const rect = canvas.getBoundingClientRect();
-        applyZoom(dist - dragRef.current.lastDist, midX - rect.left, midY - rect.top);
+        applyZoom(
+          dist - dragRef.current.lastDist,
+          (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left,
+          (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top
+        );
         dragRef.current.lastDist = dist;
       }
     };
@@ -288,18 +323,15 @@ function PointMap({ points }: { points: Point[] }) {
       canvas.removeEventListener("touchmove", onTouchMove);
       canvas.removeEventListener("touchend", onTouchEnd);
     };
-  }, [applyZoom, draw]);
+  }, [mode, applyZoom, draw]);
 
-  // Doppelklick/Doppeltap: Reset
+  // Doppelklick: View reset
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const onDblClick = () => {
-      viewRef.current = { zoom: 1, panX: 0, panY: 0 };
-      draw();
-    };
-    canvas.addEventListener("dblclick", onDblClick);
-    return () => canvas.removeEventListener("dblclick", onDblClick);
+    const onDbl = () => { viewRef.current = { zoom: 1, panX: 0, panY: 0 }; draw(); };
+    canvas.addEventListener("dblclick", onDbl);
+    return () => canvas.removeEventListener("dblclick", onDbl);
   }, [draw]);
 
   useEffect(() => { draw(); }, [draw]);
@@ -316,58 +348,57 @@ function PointMap({ points }: { points: Point[] }) {
     return () => ro.disconnect();
   }, [draw]);
 
+  const cursor = mode === "follow" ? "default" : "grab";
+
   return (
     <canvas
       ref={canvasRef}
-      className="w-full h-full rounded-b-xl"
-      style={{ minHeight: 220, cursor: "grab", touchAction: "none" }}
+      className="w-full h-full"
+      style={{ minHeight: 220, cursor, touchAction: "none" }}
     />
   );
 }
 
-// ── Letzter Punkt – Detail-Karte (inspiriert von Emlid "Punkt-Detail") ────────
+// ── Letzter Punkt – Detail-Karte ─────────────────────────────────────────────────
+
+// E: 6 Vorkomma + 3 Nachkomma = max 10 Zeichen (999999.999)
+// N: wie E
+// H: 4 Vorkomma + 3 Nachkomma = max 8 Zeichen (9999.999)
+function fmtE(v: number) { return v.toFixed(3).padStart(10, " "); }
+function fmtN(v: number) { return v.toFixed(3).padStart(10, " "); }
+function fmtH(v: number) { return v.toFixed(3).padStart(8, " "); }
 
 function LastPointCard({ point }: { point: Point }) {
   const ts = formatTimestamp(point.timestamp);
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      {/* Kopfzeile */}
       <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-3">
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <MapPin size={15} className="text-blue-600 shrink-0" />
-          <span className="font-semibold text-slate-800 text-base truncate">{point.pid}</span>
+          {/* PID bis 14 Zeichen, kein Truncate */}
+          <span className="font-semibold text-slate-800 text-base font-mono tracking-tight" style={{ maxWidth: "14ch", overflow: "visible" }}>
+            {point.pid}
+          </span>
         </div>
         <span className="text-xs text-slate-400 shrink-0">{ts}</span>
       </div>
 
-      {/* Koordinaten */}
       <div className="px-4 py-3">
-        <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2.5">
-          Koordinaten
-        </p>
-        <div className="grid grid-cols-3 gap-3">
-          {/* Easting */}
-          <div className="bg-slate-50 rounded-lg px-3 py-2.5">
+        <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2.5">Koordinaten</p>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="bg-slate-50 rounded-lg px-2 py-2">
             <p className="text-xs text-slate-400 mb-1">E</p>
-            <p className="font-mono font-semibold text-slate-800 text-sm tabular">
-              {point.e.toFixed(3)}
-            </p>
+            <p className="font-mono font-semibold text-slate-800 text-xs tabular-nums">{fmtE(point.e)}</p>
             <p className="text-xs text-slate-400 mt-0.5">m</p>
           </div>
-          {/* Northing */}
-          <div className="bg-slate-50 rounded-lg px-3 py-2.5">
+          <div className="bg-slate-50 rounded-lg px-2 py-2">
             <p className="text-xs text-slate-400 mb-1">N</p>
-            <p className="font-mono font-semibold text-slate-800 text-sm tabular">
-              {point.n.toFixed(3)}
-            </p>
+            <p className="font-mono font-semibold text-slate-800 text-xs tabular-nums">{fmtN(point.n)}</p>
             <p className="text-xs text-slate-400 mt-0.5">m</p>
           </div>
-          {/* Height */}
-          <div className="bg-slate-50 rounded-lg px-3 py-2.5">
+          <div className="bg-slate-50 rounded-lg px-2 py-2">
             <p className="text-xs text-slate-400 mb-1">H</p>
-            <p className="font-mono font-semibold text-slate-800 text-sm tabular">
-              {point.h.toFixed(3)}
-            </p>
+            <p className="font-mono font-semibold text-slate-800 text-xs tabular-nums">{fmtH(point.h)}</p>
             <p className="text-xs text-slate-400 mt-0.5">m</p>
           </div>
         </div>
@@ -448,28 +479,26 @@ function PointList({
               {points.map((p, i) => (
                 <div
                   key={p.id}
-                  className="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-50 transition-colors group"
+                  className="px-3 py-2 flex items-start gap-2 hover:bg-slate-50 transition-colors group"
                   data-testid={`row-point-${p.id}`}
                 >
-                  {/* Nummer */}
-                  <span className="text-xs text-slate-300 tabular w-6 text-right shrink-0">
-                    {points.length - i}
+                  {/* Lfd. Nummer */}
+                  <span className="text-xs text-slate-300 tabular-nums w-5 text-right shrink-0 mt-0.5">
+                    {i + 1}
                   </span>
 
-                  {/* PID + Zeitstempel (vertikal) */}
-                  <div className="w-20 shrink-0 min-w-0">
-                    <p className="font-medium text-slate-700 text-sm truncate">{p.pid}</p>
-                    <p className="text-xs text-slate-400 truncate">{formatTimestamp(p.timestamp)}</p>
+                  {/* PID (bis 14 Zeichen) + Zeitstempel */}
+                  <div className="shrink-0 min-w-0" style={{ width: "14ch" }}>
+                    <p className="font-mono font-medium text-slate-700 text-xs leading-tight" style={{ letterSpacing: 0 }}>{p.pid}</p>
+                    <p className="text-xs text-slate-400 leading-tight mt-0.5">{formatTimestamp(p.timestamp)}</p>
                   </div>
 
-                  {/* Koordinaten */}
-                  <div
-                    className="flex-1 grid gap-1 text-xs tabular text-slate-500 min-w-0"
-                    style={{ gridTemplateColumns: "1fr 1.4fr 0.9fr" }}
-                  >
-                    <span className="text-right font-mono">{p.e.toFixed(3)}</span>
-                    <span className="text-right font-mono">{p.n.toFixed(3)}</span>
-                    <span className="text-right font-mono">{p.h.toFixed(3)}</span>
+                  {/* Koordinaten E/N/H */}
+                  <div className="flex-1 grid gap-x-1 text-xs tabular-nums text-slate-500 min-w-0 font-mono"
+                    style={{ gridTemplateColumns: "1fr 1fr 0.75fr" }}>
+                    <span className="text-right">{p.e.toFixed(3)}</span>
+                    <span className="text-right">{p.n.toFixed(3)}</span>
+                    <span className="text-right">{p.h.toFixed(3)}</span>
                   </div>
 
                   {/* Löschen */}
@@ -624,6 +653,7 @@ export default function Dashboard() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [showClearAll, setShowClearAll] = useState(false);
   const [wsStatus, setWsStatus] = useState<string>("stopped");
+  const [mapMode, setMapMode] = useState<MapMode>("full");
 
   const { data: points = [] } = useQuery<Point[]>({
     queryKey: ["/api/points"],
@@ -739,16 +769,52 @@ export default function Dashboard() {
 
         {/* Lageplan — oben, größer */}
         <div className="bg-white border-b border-slate-200 overflow-hidden">
-          {/* Kartenheader */}
-          <div className="px-4 pt-4 pb-2 flex items-center gap-2">
-            <Crosshair size={14} className="text-slate-400" />
+          {/* Kartenheader + Modus-Umschalter */}
+          <div className="px-3 pt-3 pb-2 flex items-center gap-2">
+            <Crosshair size={14} className="text-slate-400 shrink-0" />
             <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">Lageplan</span>
             {points.length > 0 && (
-              <span className="ml-auto text-xs text-slate-400">{points.length} Pt.</span>
+              <span className="text-xs text-slate-400">{points.length} Pt.</span>
             )}
+            {/* Modus-Buttons */}
+            <div className="ml-auto flex items-center gap-1">
+              <button
+                title="Alle Punkte (Full Extent)"
+                onClick={() => setMapMode("full")}
+                className={`p-1.5 rounded-lg transition-colors ${
+                  mapMode === "full"
+                    ? "bg-blue-100 text-blue-700"
+                    : "text-slate-400 hover:bg-slate-100"
+                }`}
+              >
+                <Maximize2 size={14} />
+              </button>
+              <button
+                title="Fixer Zoom (kein automatisches Refit)"
+                onClick={() => setMapMode("fixed")}
+                className={`p-1.5 rounded-lg transition-colors ${
+                  mapMode === "fixed"
+                    ? "bg-blue-100 text-blue-700"
+                    : "text-slate-400 hover:bg-slate-100"
+                }`}
+              >
+                <Lock size={14} />
+              </button>
+              <button
+                title="Letzten Punkt folgen"
+                onClick={() => setMapMode("follow")}
+                className={`p-1.5 rounded-lg transition-colors ${
+                  mapMode === "follow"
+                    ? "bg-blue-100 text-blue-700"
+                    : "text-slate-400 hover:bg-slate-100"
+                }`}
+              >
+                <Navigation size={14} />
+              </button>
+            </div>
           </div>
-          <div style={{ height: 280 }}>
-            <PointMap points={points} />
+          <div style={{ height: 300 }}>
+            <PointMap points={points} mode={mapMode} />
           </div>
         </div>
 
