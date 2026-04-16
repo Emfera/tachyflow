@@ -526,8 +526,8 @@ export default function Dashboard() {
   const status = session?.status ?? wsStatus;
   const isRunning = status === "running";
 
-  // Letzter gemessener Punkt (neuester zuerst)
-  const lastPoint = points.length > 0 ? points[points.length - 1] : null;
+  // API gibt Punkte DESC zurück (neuester zuerst) → points[0] ist der neueste
+  const lastPoint = points.length > 0 ? points[0] : null;
 
   const startMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/collector/start"),
@@ -614,7 +614,7 @@ export default function Dashboard() {
             )}
           </div>
           <div style={{ height: 280 }}>
-            <PointMap points={points} />
+            <PointMap points={[...points].reverse()} />
           </div>
         </div>
 

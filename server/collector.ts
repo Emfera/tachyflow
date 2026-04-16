@@ -75,6 +75,10 @@ function parseGSI(line: string): { pid: string; e: number; n: number; h: number 
   return { pid, e, n, h };
 }
 
+// Letzte rohe GSI-Zeilen für Debug-Zwecke speichern
+export const rawLog: string[] = [];
+const RAW_LOG_MAX = 20;
+
 type CollectorState = {
   running: boolean;
   socket: net.Socket | null;
@@ -142,6 +146,10 @@ export function startCollector(port: string) {
       for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed) continue;
+
+        // Rohe Zeile für Debug-Endpunkt speichern
+        rawLog.push(trimmed);
+        if (rawLog.length > RAW_LOG_MAX) rawLog.shift();
 
         const measurement = parseGSI(trimmed);
         if (!measurement) continue;

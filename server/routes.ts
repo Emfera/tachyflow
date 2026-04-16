@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
 import { storage } from "./storage";
-import { startCollector, stopCollector, setWsServer } from "./collector";
+import { startCollector, stopCollector, setWsServer, rawLog } from "./collector";
 
 export function registerRoutes(httpServer: ReturnType<typeof createServer>, app: Express) {
   // WebSocket auf separatem Port 5001 (kein Konflikt mit Vite)
@@ -62,6 +62,11 @@ export function registerRoutes(httpServer: ReturnType<typeof createServer>, app:
   app.post("/api/collector/stop", (_req, res) => {
     stopCollector();
     res.json({ ok: true, status: "stopped" });
+  });
+
+  // ── Debug: letzte rohe GSI-Zeilen ────────────────────────────────────────
+  app.get("/api/debug/raw", (_req, res) => {
+    res.json({ lines: rawLog });
   });
 
   return httpServer;
