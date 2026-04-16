@@ -22,12 +22,19 @@ function parseGSI(line: string): { pid: string; e: number; n: number; h: number 
 
   if (!gsiLine) return null;
 
-  // Words extrahieren: IIIUUU+VVVVVVVVVVVVVVVV
-  const wordRe = /\*?(\d{2})[.\d]{4}([+-]\w+)/g;
+  // GSI16-Format: jedes Wort ist WWWUUU+VVVVVVVVVVVVVVVV (16 Zeichen)
+  // WWW = 2-stelliger Wort-Index (z.B. 11, 21, 22, 31, 51...)
+  // UUU = 3-4 Zeichen Einheit/Info (z.B. .032, ...)
+  // +VVVVVVVVVVVVVVVV = Vorzeichen + 16-stelliger Wert
+  const wordRe = /\b(\d{2})[.\d]{0,4}([+-][\w.]+)/g;
   const words: Record<number, string> = {};
   let m;
   while ((m = wordRe.exec(gsiLine)) !== null) {
-    words[parseInt(m[1])] = m[2];
+    const idx = parseInt(m[1]);
+    // Nur sinnvolle Indizes speichern (nicht z.B. Teile von Koordinatenwerten)
+    if (idx >= 11 && idx <= 99) {
+      words[idx] = m[2];
+    }
   }
 
   // PID (Index 11)
