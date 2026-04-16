@@ -42,10 +42,11 @@ function parseGSI(line: string): { pid: string; e: number; n: number; h: number 
   if (!pidRaw) return null;
   const pid = pidRaw.replace(/^[+0]+/, "").replace(/[^A-Za-z0-9]/g, "") || "0";
 
-  // Koordinaten: Maske 1 = 21/22/31, andere = 81/82/83
-  const eRaw = words[21] ?? words[81];
-  const nRaw = words[22] ?? words[82];
-  const hRaw = words[31] ?? words[83];
+  // Koordinaten: Maske 2 = 81/82/83 (Ost/Nord/Höhe — bevorzugt)
+  // Maske 1 liefert auf 21/22/31 nur Winkel/Distanz — NICHT verwenden
+  const eRaw = words[81];
+  const nRaw = words[82];
+  const hRaw = words[83];
 
   if (!eRaw || !nRaw || !hRaw) return null;
 
