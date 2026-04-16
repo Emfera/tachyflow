@@ -22,43 +22,53 @@ function parseGSI(line: string): { pid: string; e: number; n: number; h: number 
 
   if (!gsiLine) return null;
 
-  // GSI16-Format: jedes Wort ist WWWUUU+VVVVVVVVVVVVVVVV (16 Zeichen)
-  // WWW = 2-stelliger Wort-Index (z.B. 11, 21, 22, 31, 51...)
-  // UUU = 3-4 Zeichen Einheit/Info (z.B. .032, ...)
-  // +VVVVVVVVVVVVVVVV = Vorzeichen + 16-stelliger Wert
-  const wordRe = /\b(\d{2})[.\d]{0,4}([+-][\w.]+)/g;
-  const words: Record<number, string> = {};
+  // GSI-Format: WWUUU+VVVVVVVVVVVVVVVV
+  // WW = Wort-Index (2 Ziffern), UUU = Einheit (z.B. .06, .032)
+  // Unit-Code bestimmt den Divisor: 06 = /10000 (0.1mm), 03 = /1000 (mm)
+  const wordRe = /\b(\d{2})([.\d]{0,4})([+-][\w.]+)/g;
+  const words: Record<number, { unit: number; val: string }> = {};
   let m;
   while ((m = wordRe.exec(gsiLine)) !== null) {
     const idx = parseInt(m[1]);
-    // Nur sinnvolle Indizes speichern (nicht z.B. Teile von Koordinatenwerten)
     if (idx >= 11 && idx <= 99) {
-      words[idx] = m[2];
+      // Unit aus Prefix: '81.06' → unit=6, '22.032' → unit=2
+      const unitMatch = m[2].match(/\.(\d{1,2})$/);
+      const unit = unitMatch ? parseInt(unitMatch[1]) : 3;
+      words[idx] = { unit, val: m[3] };
     }
   }
 
   // PID (Index 11)
-  const pidRaw = words[11];
-  if (!pidRaw) return null;
-  const pid = pidRaw.replace(/^[+0]+/, "").replace(/[^A-Za-z0-9]/g, "") || "0";
+  const pidEntry = words[11];
+  if (!pidEntry) return null;
+  const pid = pidEntry.val.replace(/^[+0]+/, "").replace(/[^A-Za-z0-9]/g, "") || "0";
 
-  // Koordinaten: Maske 2 = 81/82/83 (Ost/Nord/Höhe — bevorzugt)
-  // Maske 1 liefert auf 21/22/31 nur Winkel/Distanz — NICHT verwenden
-  const eRaw = words[81];
-  const nRaw = words[82];
-  const hRaw = words[83];
+  // Koordinaten: WI81=Ost, WI82=Nord, WI83=Höhe (Maske 2+3)
+  const eEntry = words[81];
+  const nEntry = words[82];
+  const hEntry = words[83];
 
-  if (!eRaw || !nRaw || !hRaw) return null;
+  if (!eEntry || !nEntry || !hEntry) return null;
 
-  function toMeters(val: string): number | null {
-    const n = parseFloat(val.replace(",", "."));
-    if (isNaN(n)) return null;
-    return n / 1000;
+  // GSI Unit-Code → Divisor
+  // Unit 06 = /10000 (0.1mm, GSI16), Unit 03 = /1000 (mm, GSI8)
+  const GSI_DIVISOR: Record<number, number> = {
+    0: 1, 1: 10, 2: 100, 3: 1000, 4: 10000,
+    5: 100000, 6: 10000, 7: 100000, 8: 100000,
+  };
+
+  function toMeters(entry: { unit: number; val: string }): number | null {
+    try {
+      const divisor = GSI_DIVISOR[entry.unit] ?? 1000;
+      const sign = entry.val.startsWith('-') ? -1 : 1;
+      const raw = entry.val.replace(/^[+-]0*/, '') || '0';
+      return sign * parseInt(raw) / divisor;
+    } catch { return null; }
   }
 
-  const e = toMeters(eRaw);
-  const n = toMeters(nRaw);
-  const h = toMeters(hRaw);
+  const e = toMeters(eEntry);
+  const n = toMeters(nEntry);
+  const h = toMeters(hEntry);
 
   if (e === null || n === null || h === null) return null;
 
